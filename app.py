@@ -334,10 +334,10 @@
 
 
 
-
 import io
 import json
 import re
+import time
 
 import streamlit as st
 from PIL import Image, ImageDraw
@@ -384,7 +384,7 @@ def discover_models(key):
                 "generateContent" in actions
                 and name.startswith("gemini")
                 and "flash" in name
-                and not any(x in name for x in ("image", "tts", "live", "audio", "embedding", "lite"))
+                and not any(x in name for x in ("image", "tts", "live", "audio", "embedding"))
             ):
                 found.append(name)
         return sorted(found, reverse=True)
@@ -421,7 +421,7 @@ with st.sidebar:
 def model_candidates():
     override = [custom_model.strip()] if custom_model.strip() else []
     seen, ordered = set(), []
-    for n in override + FALLBACK_MODELS + discover_models(api_key)[:4]:
+    for n in override + FALLBACK_MODELS + discover_models(api_key)[:6]:
         if n not in seen:
             seen.add(n)
             ordered.append(n)
@@ -442,13 +442,27 @@ def call_gemini(contents, as_json=False):
         temperature=0.2,
     )
     errors = []
+    status_box = st.empty()
     for name in model_candidates():
-        try:
-            resp = client.models.generate_content(model=name, contents=contents, config=cfg)
-            if resp.text:
-                return resp.text, name
-        except Exception as e:
-            errors.append(f"{name}: {str(e)[:150]}")
+        # Retry temporary errors (503 overloaded, 429 rate limit) with growing waits
+        for attempt in range(3):
+            try:
+                resp = client.models.generate_content(model=name, contents=contents, config=cfg)
+                status_box.empty()
+                if resp.text:
+                    return resp.text, name
+                break  # empty answer: move on to the next model
+            except Exception as e:
+                msg = str(e)
+                temporary = any(code in msg for code in ("503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "500"))
+                if temporary and attempt < 2:
+                    wait = 3 * (attempt + 1)
+                    status_box.info(f"{name} is busy. Retrying in {wait}s (attempt {attempt + 2}/3)...")
+                    time.sleep(wait)
+                    continue
+                errors.append(f"{name}: {msg[:150]}")
+                break
+    status_box.empty()
     raise RuntimeError("All models failed:\n" + "\n".join(errors))
 
 
@@ -572,7 +586,5 @@ if uploaded:
     if qa and qa[0] == uploaded.name:
         st.markdown("### 💬 Q&A")
         st.markdown(f"**Q:** {qa[1]}")
-        st.markdown(f"**A:** {qa[2]}")
-        st.caption(f"model: {qa[3]}")
         st.markdown(f"**A:** {qa[2]}")
         st.caption(f"model: {qa[3]}")
