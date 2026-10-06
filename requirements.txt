@@ -1,3 +1,7 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
 streamlit
-openai
+transformers
+torch
 pillow
+numpy
+easyocr
