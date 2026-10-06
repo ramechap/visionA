@@ -333,7 +333,6 @@
 
 
 
-
 import io
 import json
 import re
@@ -344,248 +343,1103 @@ from PIL import Image, ImageDraw
 from google import genai
 from google.genai import types
 
-st.set_page_config(page_title="Gemini Vision Scanner", page_icon="📸", layout="wide")
 
-st.markdown("""
+# ============================================================
+# PAGE CONFIG
+# ============================================================
+
+st.set_page_config(
+    page_title="Gemini Vision Scanner",
+    page_icon="📸",
+    layout="wide",
+)
+
+
+# ============================================================
+# CUSTOM CSS
+# ============================================================
+
+st.markdown(
+    """
     <style>
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold;
-        background-color: #FF9D00; color: white; height: 48px; border: none; }
-    .stButton>button:hover { background-color: #E08900; color: white; }
-    h1, .subtitle { text-align: center; }
+    .stButton>button {
+        width: 100%;
+        border-radius: 8px;
+        font-weight: bold;
+        background-color: #FF9D00;
+        color: white;
+        height: 48px;
+        border: none;
+    }
+
+    .stButton>button:hover {
+        background-color: #E08900;
+        color: white;
+    }
+
+    h1, .subtitle {
+        text-align: center;
+    }
+
+    .model-box {
+        padding: 10px;
+        border-radius: 8px;
+        background-color: rgba(128,128,128,0.1);
+        margin-bottom: 10px;
+    }
     </style>
-    """, unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# ============================================================
+# HEADER
+# ============================================================
 
 st.title("📸 Gemini Vision Scanner")
-st.markdown("<p class='subtitle'>Scene understanding, object detection, text reading and visual Q&A, "
-            "powered by Google Gemini.</p>", unsafe_allow_html=True)
 
-# ---------- API key ----------
+st.markdown(
+    """
+    <p class='subtitle'>
+    Scene understanding, object detection, text reading and visual Q&A,
+    powered by Google Gemini.
+    </p>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# ============================================================
+# API KEY
+# ============================================================
+
 api_key = st.secrets.get("GEMINI_API_KEY")
+
 if not api_key:
-    st.warning("⚠️ Add GEMINI_API_KEY in Streamlit Cloud → Settings → Secrets. "
-               "Get a free key at aistudio.google.com.")
+    st.warning(
+        "⚠️ Add GEMINI_API_KEY in Streamlit Cloud → Settings → Secrets. "
+        "Get your API key from Google AI Studio."
+    )
     st.stop()
+
+
+# ============================================================
+# GEMINI CLIENT
+# ============================================================
 
 client = genai.Client(api_key=api_key)
 
-FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-flash-latest"]
-PALETTE = ["#FF9D00", "#00B4D8", "#E63946", "#2A9D8F", "#9B5DE5", "#F15BB5", "#80B918"]
 
+# ============================================================
+# FALLBACK MODELS
+# ============================================================
+
+# These are only fallbacks.
+# Models discovered from Google's API are preferred.
+FALLBACK_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-flash-latest",
+]
+
+
+# ============================================================
+# COLORS FOR OBJECT BOXES
+# ============================================================
+
+PALETTE = [
+    "#FF9D00",
+    "#00B4D8",
+    "#E63946",
+    "#2A9D8F",
+    "#9B5DE5",
+    "#F15BB5",
+    "#80B918",
+]
+
+
+# ============================================================
+# DISCOVER MODELS
+# ============================================================
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def discover_models(key):
-    """Ask Google which Gemini Flash models this key can call, newest first."""
+    """
+    Ask Google which Gemini models this API key can access.
+
+    Only models that appear to support generateContent are included.
+    """
+
     try:
         found = []
-        for m in genai.Client(api_key=key).models.list():
-            actions = getattr(m, "supported_actions", None) or []
-            name = m.name.replace("models/", "")
-            if (
-                (not actions or "generateContent" in actions)
-                and name.startswith("gemini")
-                and "flash" in name
-                and not any(x in name for x in ("image", "tts", "live", "audio", "embedding"))
-            ):
-                found.append(name)
-        return sorted(found, reverse=True)
+
+        discovery_client = genai.Client(api_key=key)
+
+        for model in discovery_client.models.list():
+
+            name = getattr(model, "name", "")
+            actions = getattr(model, "supported_actions", None) or []
+
+            name = name.replace("models/", "")
+
+            # Only Gemini models
+            if not name.startswith("gemini"):
+                continue
+
+            # Exclude image/audio/live/embedding models
+            excluded = (
+                "image",
+                "tts",
+                "live",
+                "audio",
+                "embedding",
+            )
+
+            if any(x in name.lower() for x in excluded):
+                continue
+
+            # If supported_actions exists, require generateContent
+            if actions and "generateContent" not in actions:
+                continue
+
+            found.append(name)
+
+        # Prefer flash models first.
+        flash_models = [
+            name for name in found
+            if "flash" in name.lower()
+        ]
+
+        other_models = [
+            name for name in found
+            if "flash" not in name.lower()
+        ]
+
+        return sorted(flash_models, reverse=True) + sorted(
+            other_models,
+            reverse=True,
+        )
+
     except Exception:
         return []
 
 
-# ---------- Sidebar ----------
+# ============================================================
+# SIDEBAR
+# ============================================================
+
 with st.sidebar:
+
     st.header("⚙️ Settings")
-    custom_model = st.text_input("Model name (optional override)", "",
-                                 placeholder="e.g. gemini-3.8-flash")
-    language = st.selectbox("Response language", ["English", "Nepali", "Hindi", "French", "Spanish", "German"])
-    detail = st.radio("Detail level", ["Quick", "Detailed"], index=1)
+
+    custom_model = st.text_input(
+        "Model name (optional override)",
+        "",
+        placeholder="e.g. gemini-3.8-flash",
+    )
+
+    language = st.selectbox(
+        "Response language",
+        [
+            "English",
+            "Nepali",
+            "Hindi",
+            "French",
+            "Spanish",
+            "German",
+        ],
+    )
+
+    detail = st.radio(
+        "Detail level",
+        [
+            "Quick",
+            "Detailed",
+        ],
+        index=1,
+    )
+
+    st.markdown("---")
+
+    # --------------------------------------------------------
+    # LIST MODELS BUTTON
+    # --------------------------------------------------------
 
     if st.button("🔎 List models available to my key"):
+
         try:
-            names = []
-            for m in client.models.list():
-                actions = getattr(m, "supported_actions", None) or []
-                if "generateContent" in actions and "gemini" in m.name:
-                    names.append(m.name.replace("models/", ""))
-            st.session_state["available"] = sorted(names)
+
+            available = discover_models(api_key)
+
+            st.session_state["available"] = available
+
+            if available:
+                st.success(
+                    f"Found {len(available)} model(s)."
+                )
+            else:
+                st.warning(
+                    "No compatible Gemini models were found."
+                )
+
         except Exception as e:
-            st.error(f"Could not list models: {e}")
+
+            st.error(
+                f"Could not list models: {e}"
+            )
+
+    # --------------------------------------------------------
+    # SHOW AVAILABLE MODELS
+    # --------------------------------------------------------
+
     if st.session_state.get("available"):
-        st.caption("Models your key can use (copy one into the box above):")
-        st.code("\n".join(st.session_state["available"]))
 
-    st.caption("Note: on Google's free tier, prompts may be used to improve Google products. "
-               "Don't upload sensitive images.")
+        st.caption(
+            "Models your API key can access:"
+        )
 
+        st.code(
+            "\n".join(
+                st.session_state["available"]
+            )
+        )
+
+    st.markdown("---")
+
+    st.caption(
+        "⚠️ On Google's free tier, prompts may be used to "
+        "improve Google products. Don't upload sensitive images."
+    )
+
+
+# ============================================================
+# MODEL CANDIDATES
+# ============================================================
 
 def model_candidates():
-    override = [custom_model.strip()] if custom_model.strip() else []
-    seen, ordered = set(), []
-    for n in override + FALLBACK_MODELS + discover_models(api_key)[:6]:
-        if n not in seen:
-            seen.add(n)
-            ordered.append(n)
+    """
+    Build an ordered list of models.
+
+    Priority:
+    1. User override
+    2. Models discovered from the API
+    3. Hard-coded fallbacks
+    """
+
+    override = []
+
+    if custom_model.strip():
+        override = [
+            custom_model.strip()
+        ]
+
+    discovered = discover_models(api_key)
+
+    candidates = (
+        override
+        + discovered
+        + FALLBACK_MODELS
+    )
+
+    # Remove duplicates while preserving order
+    seen = set()
+    ordered = []
+
+    for name in candidates:
+
+        if not name:
+            continue
+
+        if name in seen:
+            continue
+
+        seen.add(name)
+        ordered.append(name)
+
     return ordered
 
 
-# ---------- Helpers ----------
-def image_part(img):
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=90)
-    return types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg")
+# ============================================================
+# IMAGE CONVERSION
+# ============================================================
 
+def image_part(img):
+    """
+    Convert PIL image into Gemini-compatible image Part.
+    """
+
+    buf = io.BytesIO()
+
+    img.save(
+        buf,
+        format="JPEG",
+        quality=90,
+    )
+
+    return types.Part.from_bytes(
+        data=buf.getvalue(),
+        mime_type="image/jpeg",
+    )
+
+
+# ============================================================
+# GEMINI API CALL
+# ============================================================
 
 def call_gemini(contents, as_json=False):
-    """Tries each candidate model until one works. Returns (text, model_used)."""
+    """
+    Try available Gemini models.
+
+    503 / UNAVAILABLE:
+        Temporary overload.
+        Retry up to 3 times.
+
+    429 / RESOURCE_EXHAUSTED:
+        Quota/rate limit.
+        DO NOT waste time retrying the same model.
+
+    Other errors:
+        Move to the next model.
+    """
+
     cfg = types.GenerateContentConfig(
-        response_mime_type="application/json" if as_json else "text/plain",
+        response_mime_type=(
+            "application/json"
+            if as_json
+            else "text/plain"
+        ),
         temperature=0.2,
     )
-    errors = []
-    status_box = st.empty()
-    for name in model_candidates():
-        # Retry temporary errors (503 overloaded, 429 rate limit) with growing waits
-        for attempt in range(3):
-            try:
-                resp = client.models.generate_content(model=name, contents=contents, config=cfg)
-                status_box.empty()
-                if resp.text:
-                    return resp.text, name
-                break  # empty answer: move on to the next model
-            except Exception as e:
-                msg = str(e)
-                temporary = any(code in msg for code in ("503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "500"))
-                if temporary and attempt < 2:
-                    wait = 3 * (attempt + 1)
-                    status_box.info(f"{name} is busy. Retrying in {wait}s (attempt {attempt + 2}/3)...")
-                    time.sleep(wait)
-                    continue
-                errors.append(f"{name}: {msg[:150]}")
-                break
-    status_box.empty()
-    raise RuntimeError("All models failed:\n" + "\n".join(errors))
 
+    errors = []
+
+    status_box = st.empty()
+
+    candidates = model_candidates()
+
+    if not candidates:
+
+        raise RuntimeError(
+            "No Gemini models were found for this API key."
+        )
+
+    for name in candidates:
+
+        for attempt in range(3):
+
+            try:
+
+                resp = client.models.generate_content(
+                    model=name,
+                    contents=contents,
+                    config=cfg,
+                )
+
+                status_box.empty()
+
+                if resp.text:
+
+                    return resp.text, name
+
+                errors.append(
+                    f"{name}: empty response"
+                )
+
+                break
+
+            except Exception as e:
+
+                msg = str(e)
+
+                upper_msg = msg.upper()
+
+                # =================================================
+                # 429 / QUOTA
+                # =================================================
+
+                if (
+                    "429" in msg
+                    or "RESOURCE_EXHAUSTED" in upper_msg
+                    or "QUOTA" in upper_msg
+                ):
+
+                    errors.append(
+                        f"{name}: quota/rate limit exhausted"
+                    )
+
+                    # DO NOT retry.
+                    break
+
+                # =================================================
+                # 503 / TEMPORARY UNAVAILABLE
+                # =================================================
+
+                if (
+                    "503" in msg
+                    or "UNAVAILABLE" in upper_msg
+                    or "500" in msg
+                ):
+
+                    if attempt < 2:
+
+                        wait = 3 * (attempt + 1)
+
+                        status_box.warning(
+                            f"{name} is temporarily busy. "
+                            f"Retrying in {wait}s "
+                            f"(attempt {attempt + 2}/3)..."
+                        )
+
+                        time.sleep(wait)
+
+                        continue
+
+                # =================================================
+                # OTHER ERROR
+                # =================================================
+
+                errors.append(
+                    f"{name}: {msg[:250]}"
+                )
+
+                break
+
+    status_box.empty()
+
+    raise RuntimeError(
+        "No Gemini model could process this request.\n\n"
+        + "\n".join(errors)
+    )
+
+
+# ============================================================
+# JSON PARSER
+# ============================================================
 
 def parse_json(text):
-    text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
+    """
+    Clean markdown code fences and parse JSON.
+    """
+
+    text = text.strip()
+
+    # Remove ```json ... ```
+    text = re.sub(
+        r"^```(?:json)?\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    text = re.sub(
+        r"\s*```$",
+        "",
+        text,
+    )
+
     return json.loads(text)
 
 
+# ============================================================
+# DRAW OBJECT BOXES
+# ============================================================
+
 def draw_boxes(img, objects):
+
     out = img.copy()
-    d = ImageDraw.Draw(out)
-    w, h = out.size
-    labels = sorted({str(o.get("label", "")) for o in objects})
-    for o in objects:
-        box = o.get("box_2d")
+
+    draw = ImageDraw.Draw(out)
+
+    width, height = out.size
+
+    labels = sorted(
+        {
+            str(
+                obj.get(
+                    "label",
+                    "",
+                )
+            )
+            for obj in objects
+        }
+    )
+
+    for obj in objects:
+
+        box = obj.get("box_2d")
+
         if not box or len(box) != 4:
             continue
-        ymin, xmin, ymax, xmax = box  # Gemini: 0-1000 normalized [ymin, xmin, ymax, xmax]
-        x0, y0, x1, y1 = xmin / 1000 * w, ymin / 1000 * h, xmax / 1000 * w, ymax / 1000 * h
-        c = PALETTE[labels.index(str(o.get("label", ""))) % len(PALETTE)]
-        d.rectangle([x0, y0, x1, y1], outline=c, width=4)
-        d.text((x0 + 5, y0 + 5), str(o.get("label", "")), fill=c)
+
+        try:
+
+            ymin, xmin, ymax, xmax = box
+
+            x0 = xmin / 1000 * width
+            y0 = ymin / 1000 * height
+            x1 = xmax / 1000 * width
+            y1 = ymax / 1000 * height
+
+        except Exception:
+            continue
+
+        label = str(
+            obj.get(
+                "label",
+                "",
+            )
+        )
+
+        if label in labels:
+
+            color = PALETTE[
+                labels.index(label)
+                % len(PALETTE)
+            ]
+
+        else:
+
+            color = PALETTE[0]
+
+        draw.rectangle(
+            [
+                x0,
+                y0,
+                x1,
+                y1,
+            ],
+            outline=color,
+            width=4,
+        )
+
+        draw.text(
+            (
+                x0 + 5,
+                y0 + 5,
+            ),
+            label,
+            fill=color,
+        )
+
     return out
 
 
-ANALYSIS_PROMPT = """You are an expert computer-vision analyst. Analyze the image and return ONLY valid JSON
-with exactly these keys:
-{{
-  "caption": "one-sentence description of the scene",
-  "summary": "{depth} description of the context, setting, mood and activity",
-  "objects": [{{"label": "object name", "box_2d": [ymin, xmin, ymax, xmax], "confidence": "high|medium|low"}}],
-  "text_found": ["every piece of readable text, verbatim, in its original language"],
-  "colors": ["3-5 dominant colors as plain names"],
-  "tags": ["8-12 short keywords"]
-}}
-Rules: box_2d values are integers from 0 to 1000 (normalized). List up to 20 of the most important objects.
-Write caption, summary, tags and colors in {lang}. Keep text_found in the original language.
-If there is no text, use an empty list."""
+# ============================================================
+# ANALYSIS PROMPT
+# ============================================================
 
-# ---------- Main ----------
-uploaded = st.file_uploader("Upload an image (JPG, PNG, JPEG)", type=["jpg", "jpeg", "png"])
+ANALYSIS_PROMPT = """
+You are an expert computer-vision analyst.
+
+Analyze the image and return ONLY valid JSON.
+
+The JSON must contain exactly these keys:
+
+{
+  "caption": "one-sentence description of the scene",
+
+  "summary": "{depth} description of the context, setting, mood and activity",
+
+  "objects": [
+    {
+      "label": "object name",
+      "box_2d": [ymin, xmin, ymax, xmax],
+      "confidence": "high|medium|low"
+    }
+  ],
+
+  "text_found": [
+    "every piece of readable text, verbatim, in its original language"
+  ],
+
+  "colors": [
+    "3-5 dominant colors as plain names"
+  ],
+
+  "tags": [
+    "8-12 short keywords"
+  ]
+}
+
+Rules:
+
+1. box_2d values must be integers from 0 to 1000.
+
+2. box_2d format is:
+   [ymin, xmin, ymax, xmax]
+
+3. Coordinates are normalized to 0-1000.
+
+4. List up to 20 of the most important objects.
+
+5. Write caption, summary, tags and colors in {lang}.
+
+6. Keep text_found in the original language.
+
+7. Extract every piece of readable text you can identify.
+
+8. If there is no readable text, use an empty list.
+
+9. Return ONLY JSON.
+
+10. Do not include markdown fences.
+
+11. Do not add explanations outside the JSON.
+"""
+
+
+# ============================================================
+# MAIN APP
+# ============================================================
+
+uploaded = st.file_uploader(
+    "Upload an image (JPG, PNG, JPEG)",
+    type=[
+        "jpg",
+        "jpeg",
+        "png",
+    ],
+)
+
 
 if uploaded:
-    image = Image.open(uploaded).convert("RGB")
-    image.thumbnail((1536, 1536))
+
+    # --------------------------------------------------------
+    # LOAD IMAGE
+    # --------------------------------------------------------
+
+    try:
+
+        image = Image.open(
+            uploaded
+        ).convert("RGB")
+
+        image.thumbnail(
+            (
+                1536,
+                1536,
+            )
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Could not open image: {e}"
+        )
+
+        st.stop()
+
+    # --------------------------------------------------------
+    # IMAGE / CONTROLS
+    # --------------------------------------------------------
 
     left, right = st.columns(2)
-    left.image(image, caption=uploaded.name, use_container_width=True)
+
+    with left:
+
+        st.image(
+            image,
+            caption=uploaded.name,
+            use_container_width=True,
+        )
 
     with right:
-        run = st.button("Run Full Analysis 🚀")
+
+        run = st.button(
+            "🚀 Run Full Analysis"
+        )
+
         st.markdown("---")
-        question = st.text_input("💬 Or ask a question about this image",
-                                 placeholder="How many people are wearing hats?")
-        ask = st.button("Ask Gemini")
+
+        question = st.text_input(
+            "💬 Or ask a question about this image",
+            placeholder=(
+                "How many people are wearing hats?"
+            ),
+        )
+
+        ask = st.button(
+            "🔎 Ask Gemini"
+        )
+
+    # ========================================================
+    # FULL ANALYSIS
+    # ========================================================
 
     if run:
-        with st.spinner("Gemini is analyzing your image..."):
+
+        with st.spinner(
+            "Gemini is analyzing your image..."
+        ):
+
             try:
+
                 prompt = ANALYSIS_PROMPT.format(
-                    depth="2-3 sentence" if detail == "Quick" else "detailed 4-6 sentence",
-                    lang=language)
-                text, used = call_gemini([image_part(image), prompt], as_json=True)
+                    depth=(
+                        "2-3 sentence"
+                        if detail == "Quick"
+                        else "detailed 4-6 sentence"
+                    ),
+                    lang=language,
+                )
+
+                text, used_model = call_gemini(
+                    [
+                        image_part(image),
+                        prompt,
+                    ],
+                    as_json=True,
+                )
+
                 data = parse_json(text)
-                data["_model"] = used
-                st.session_state["gem_result"] = (uploaded.name, data)
+
+                # Store model used
+                data["_model"] = used_model
+
+                # Store result
+                st.session_state[
+                    "gem_result"
+                ] = (
+                    uploaded.name,
+                    data,
+                )
+
             except json.JSONDecodeError:
-                st.error("The model returned malformed JSON. Please click Run again.")
+
+                st.error(
+                    "Gemini returned invalid JSON. "
+                    "Please try again."
+                )
+
             except Exception as e:
-                st.error(f"Analysis failed: {e}")
-                st.caption("Models tried: " + ", ".join(model_candidates()))
-                st.info("Check that your API key is valid, that you haven't hit the free-tier rate limit "
-                        "(wait a minute and retry), or try a different model name in the sidebar.")
+
+                error_text = str(e)
+
+                st.error(
+                    f"Analysis failed: {error_text}"
+                )
+
+                # ------------------------------------------------
+                # Friendly explanation
+                # ------------------------------------------------
+
+                if (
+                    "429" in error_text
+                    or "RESOURCE_EXHAUSTED" in error_text
+                    or "quota" in error_text.lower()
+                ):
+
+                    st.warning(
+                        "⚠️ Your Gemini API quota/rate limit "
+                        "appears to be exhausted. "
+                        "Changing the image or retrying immediately "
+                        "usually will not fix a quota error."
+                    )
+
+                    st.info(
+                        "Check your Google AI Studio/API project "
+                        "quota and billing settings, or use an "
+                        "API key from a project with available quota."
+                    )
+
+                elif (
+                    "503" in error_text
+                    or "UNAVAILABLE" in error_text
+                ):
+
+                    st.warning(
+                        "⚠️ Gemini is temporarily overloaded. "
+                        "The app already retried the request. "
+                        "Please try again later."
+                    )
+
+                else:
+
+                    st.info(
+                        "Check your API key, model selection, "
+                        "Google API availability, and request limits."
+                    )
+
+                # Show models that were attempted
+                st.caption(
+                    "Models considered: "
+                    + ", ".join(
+                        model_candidates()
+                    )
+                )
+
+    # ========================================================
+    # VISUAL QUESTION ANSWERING
+    # ========================================================
 
     if ask and question.strip():
-        with st.spinner("Thinking..."):
-            try:
-                answer, used = call_gemini(
-                    [image_part(image), f"Answer in {language}. Question about this image: {question}"])
-                st.session_state["gem_answer"] = (uploaded.name, question, answer, used)
-            except Exception as e:
-                st.error(f"Question failed: {e}")
 
-    # ---------- Results ----------
-    saved = st.session_state.get("gem_result")
-    if saved and saved[0] == uploaded.name:
+        with st.spinner(
+            "Gemini is thinking..."
+        ):
+
+            try:
+
+                answer, used_model = call_gemini(
+                    [
+                        image_part(image),
+                        (
+                            f"Answer in {language}. "
+                            f"Question about this image: "
+                            f"{question}"
+                        ),
+                    ]
+                )
+
+                st.session_state[
+                    "gem_answer"
+                ] = (
+                    uploaded.name,
+                    question,
+                    answer,
+                    used_model,
+                )
+
+            except Exception as e:
+
+                error_text = str(e)
+
+                st.error(
+                    f"Question failed: {error_text}"
+                )
+
+                if (
+                    "429" in error_text
+                    or "RESOURCE_EXHAUSTED" in error_text
+                ):
+
+                    st.warning(
+                        "Gemini API quota/rate limit is exhausted. "
+                        "Check your Google API quota or billing."
+                    )
+
+                elif (
+                    "503" in error_text
+                    or "UNAVAILABLE" in error_text
+                ):
+
+                    st.warning(
+                        "Gemini is temporarily unavailable. "
+                        "Please try again later."
+                    )
+
+    # ========================================================
+    # ANALYSIS RESULTS
+    # ========================================================
+
+    saved = st.session_state.get(
+        "gem_result"
+    )
+
+    if (
+        saved
+        and saved[0] == uploaded.name
+    ):
+
         data = saved[1]
-        st.success(f"Analysis complete (model: {data.get('_model')})")
-        tabs = st.tabs(["📝 Summary", "🔍 Objects", "🔤 Text", "🏷️ Tags & Colors", "📥 Report"])
+
+        st.success(
+            "Analysis complete "
+            f"(model: {data.get('_model', 'unknown')})"
+        )
+
+        tabs = st.tabs(
+            [
+                "📝 Summary",
+                "🔍 Objects",
+                "🔤 Text",
+                "🏷️ Tags & Colors",
+                "📥 Report",
+            ]
+        )
+
+        # ====================================================
+        # SUMMARY
+        # ====================================================
 
         with tabs[0]:
-            st.markdown(f"### {data.get('caption', '')}")
-            st.write(data.get("summary", ""))
+
+            st.markdown(
+                f"### {data.get('caption', '')}"
+            )
+
+            st.write(
+                data.get(
+                    "summary",
+                    "",
+                )
+            )
+
+        # ====================================================
+        # OBJECTS
+        # ====================================================
 
         with tabs[1]:
-            objs = data.get("objects", [])
-            if objs:
-                st.image(draw_boxes(image, objs), use_container_width=True)
-                st.table([{"Object": o.get("label"), "Confidence": o.get("confidence", "")} for o in objs])
+
+            objects = data.get(
+                "objects",
+                [],
+            )
+
+            if objects:
+
+                st.image(
+                    draw_boxes(
+                        image,
+                        objects,
+                    ),
+                    use_container_width=True,
+                )
+
+                table_data = []
+
+                for obj in objects:
+
+                    table_data.append(
+                        {
+                            "Object": obj.get(
+                                "label",
+                                "",
+                            ),
+                            "Confidence": obj.get(
+                                "confidence",
+                                "",
+                            ),
+                        }
+                    )
+
+                st.table(
+                    table_data
+                )
+
             else:
-                st.info("No objects detected.")
+
+                st.info(
+                    "No objects detected."
+                )
+
+        # ====================================================
+        # TEXT
+        # ====================================================
 
         with tabs[2]:
-            texts = data.get("text_found", [])
+
+            texts = data.get(
+                "text_found",
+                [],
+            )
+
             if texts:
-                joined = "\n".join(str(t) for t in texts)
-                st.text_area("Text found in image", joined, height=200)
-                st.download_button("⬇️ Download text", joined, "extracted_text.txt")
+
+                joined = "\n".join(
+                    str(text)
+                    for text in texts
+                )
+
+                st.text_area(
+                    "Text found in image",
+                    joined,
+                    height=200,
+                )
+
+                st.download_button(
+                    "⬇️ Download text",
+                    joined,
+                    "extracted_text.txt",
+                    "text/plain",
+                )
+
             else:
-                st.info("No readable text found.")
+
+                st.info(
+                    "No readable text found."
+                )
+
+        # ====================================================
+        # TAGS / COLORS
+        # ====================================================
 
         with tabs[3]:
-            st.markdown("**Tags:** " + " · ".join(f"`{t}`" for t in data.get("tags", [])))
-            st.markdown("**Colors:** " + ", ".join(str(c) for c in data.get("colors", [])))
+
+            tags = data.get(
+                "tags",
+                [],
+            )
+
+            colors = data.get(
+                "colors",
+                [],
+            )
+
+            st.markdown(
+                "**Tags:** "
+                + " · ".join(
+                    f"`{tag}`"
+                    for tag in tags
+                )
+            )
+
+            st.markdown(
+                "**Colors:** "
+                + ", ".join(
+                    str(color)
+                    for color in colors
+                )
+            )
+
+        # ====================================================
+        # JSON REPORT
+        # ====================================================
 
         with tabs[4]:
-            st.json(data)
-            st.download_button("⬇️ Download JSON report", json.dumps(data, indent=2, ensure_ascii=False),
-                               "gemini_report.json", "application/json")
 
-    qa = st.session_state.get("gem_answer")
-    if qa and qa[0] == uploaded.name:
-        st.markdown("### 💬 Q&A")
-        st.markdown(f"**Q:** {qa[1]}")
-        st.markdown(f"**A:** {qa[2]}")
-        st.caption(f"model: {qa[3]}")
+            st.json(
+                data
+            )
+
+            json_report = json.dumps(
+                data,
+                indent=2,
+                ensure_ascii=False,
+            )
+
+            st.download_button(
+                "⬇️ Download JSON report",
+                json_report,
+                "gemini_report.json",
+                "application/json",
+            )
+
+    # ========================================================
+    # Q&A RESULT
+    # ========================================================
+
+    qa = st.session_state.get(
+        "gem_answer"
+    )
+
+    if (
+        qa
+        and qa[0] == uploaded.name
+    ):
+
+        st.markdown(
+            "### 💬 Q&A"
+        )
+
+        st.markdown(
+            f"**Q:** {qa[1]}"
+        )
+
+        st.markdown(
+            f"**A:** {qa[2]}"
+        )
+
+        st.caption(
+            f"model: {qa[3]}"
+        )
