@@ -935,17 +935,17 @@ Analyze the image and return ONLY valid JSON.
 
 The JSON must contain exactly these keys:
 
-{
+{{
   "caption": "one-sentence description of the scene",
 
   "summary": "{depth} description of the context, setting, mood and activity",
 
   "objects": [
-    {
+    {{
       "label": "object name",
       "box_2d": [ymin, xmin, ymax, xmax],
       "confidence": "high|medium|low"
-    }
+    }}
   ],
 
   "text_found": [
@@ -959,7 +959,7 @@ The JSON must contain exactly these keys:
   "tags": [
     "8-12 short keywords"
   ]
-}
+}}
 
 Rules:
 
