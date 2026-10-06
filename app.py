@@ -359,6 +359,7 @@ st.title("📸 Gemini Vision Scanner")
 st.markdown("<p class='subtitle'>Scene understanding, object detection, text reading and visual Q&A, "
             "powered by Google Gemini.</p>", unsafe_allow_html=True)
 
+# ---------- API key ----------
 api_key = st.secrets.get("GEMINI_API_KEY")
 if not api_key:
     st.warning("⚠️ Add GEMINI_API_KEY in Streamlit Cloud → Settings → Secrets. "
@@ -367,19 +368,35 @@ if not api_key:
 
 client = genai.Client(api_key=api_key)
 
-DEFAULT_MODELS = [
-    "gemini-3.5-flash",
-    "gemini-3-flash-preview",
-    "gemini-flash-latest",
-    "gemini-2.5-flash",  # being shut down 16 Oct 2026, last-resort fallback only
-]
+FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-flash-latest"]
 PALETTE = ["#FF9D00", "#00B4D8", "#E63946", "#2A9D8F", "#9B5DE5", "#F15BB5", "#80B918"]
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def discover_models(key):
+    """Ask Google which Gemini Flash models this key can call, newest first."""
+    try:
+        found = []
+        for m in genai.Client(api_key=key).models.list():
+            actions = getattr(m, "supported_actions", None) or []
+            name = m.name.replace("models/", "")
+            if (
+                "generateContent" in actions
+                and name.startswith("gemini")
+                and "flash" in name
+                and not any(x in name for x in ("image", "tts", "live", "audio", "embedding", "lite"))
+            ):
+                found.append(name)
+        return sorted(found, reverse=True)
+    except Exception:
+        return []
+
 
 # ---------- Sidebar ----------
 with st.sidebar:
     st.header("⚙️ Settings")
     custom_model = st.text_input("Model name (optional override)", "",
-                                 placeholder="e.g. gemini-3.5-flash")
+                                 placeholder="e.g. gemini-3.8-flash")
     language = st.selectbox("Response language", ["English", "Nepali", "Hindi", "French", "Spanish", "German"])
     detail = st.radio("Detail level", ["Quick", "Detailed"], index=1)
 
@@ -400,8 +417,16 @@ with st.sidebar:
     st.caption("Note: on Google's free tier, prompts may be used to improve Google products. "
                "Don't upload sensitive images.")
 
+
 def model_candidates():
-    return ([custom_model.strip()] if custom_model.strip() else []) + DEFAULT_MODELS
+    override = [custom_model.strip()] if custom_model.strip() else []
+    seen, ordered = set(), []
+    for n in override + FALLBACK_MODELS + discover_models(api_key)[:4]:
+        if n not in seen:
+            seen.add(n)
+            ordered.append(n)
+    return ordered
+
 
 # ---------- Helpers ----------
 def image_part(img):
@@ -409,41 +434,45 @@ def image_part(img):
     img.save(buf, format="JPEG", quality=90)
     return types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg")
 
+
 def call_gemini(contents, as_json=False):
     """Tries each candidate model until one works. Returns (text, model_used)."""
     cfg = types.GenerateContentConfig(
         response_mime_type="application/json" if as_json else "text/plain",
         temperature=0.2,
     )
-    last_err = None
+    errors = []
     for name in model_candidates():
         try:
             resp = client.models.generate_content(model=name, contents=contents, config=cfg)
             if resp.text:
                 return resp.text, name
         except Exception as e:
-            last_err = e
-    raise RuntimeError(f"All models failed. Last error: {last_err}")
+            errors.append(f"{name}: {str(e)[:150]}")
+    raise RuntimeError("All models failed:\n" + "\n".join(errors))
+
 
 def parse_json(text):
     text = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
     return json.loads(text)
 
+
 def draw_boxes(img, objects):
     out = img.copy()
     d = ImageDraw.Draw(out)
     w, h = out.size
-    labels = sorted({o.get("label", "") for o in objects})
+    labels = sorted({str(o.get("label", "")) for o in objects})
     for o in objects:
         box = o.get("box_2d")
         if not box or len(box) != 4:
             continue
-        ymin, xmin, ymax, xmax = box  # Gemini uses 0-1000 normalized [ymin, xmin, ymax, xmax]
+        ymin, xmin, ymax, xmax = box  # Gemini: 0-1000 normalized [ymin, xmin, ymax, xmax]
         x0, y0, x1, y1 = xmin / 1000 * w, ymin / 1000 * h, xmax / 1000 * w, ymax / 1000 * h
-        c = PALETTE[labels.index(o.get("label", "")) % len(PALETTE)]
+        c = PALETTE[labels.index(str(o.get("label", ""))) % len(PALETTE)]
         d.rectangle([x0, y0, x1, y1], outline=c, width=4)
-        d.text((x0 + 5, y0 + 5), o.get("label", ""), fill=c)
+        d.text((x0 + 5, y0 + 5), str(o.get("label", "")), fill=c)
     return out
+
 
 ANALYSIS_PROMPT = """You are an expert computer-vision analyst. Analyze the image and return ONLY valid JSON
 with exactly these keys:
@@ -490,7 +519,7 @@ if uploaded:
                 st.error("The model returned malformed JSON. Please click Run again.")
             except Exception as e:
                 st.error(f"Analysis failed: {e}")
-                st.info("Check that your API key is valid, you haven't hit the free-tier rate limit "
+                st.info("Check that your API key is valid, that you haven't hit the free-tier rate limit "
                         "(wait a minute and retry), or try a different model name in the sidebar.")
 
     if ask and question.strip():
@@ -524,7 +553,7 @@ if uploaded:
         with tabs[2]:
             texts = data.get("text_found", [])
             if texts:
-                joined = "\n".join(texts)
+                joined = "\n".join(str(t) for t in texts)
                 st.text_area("Text found in image", joined, height=200)
                 st.download_button("⬇️ Download text", joined, "extracted_text.txt")
             else:
@@ -532,7 +561,7 @@ if uploaded:
 
         with tabs[3]:
             st.markdown("**Tags:** " + " · ".join(f"`{t}`" for t in data.get("tags", [])))
-            st.markdown("**Colors:** " + ", ".join(data.get("colors", [])))
+            st.markdown("**Colors:** " + ", ".join(str(c) for c in data.get("colors", [])))
 
         with tabs[4]:
             st.json(data)
@@ -543,5 +572,7 @@ if uploaded:
     if qa and qa[0] == uploaded.name:
         st.markdown("### 💬 Q&A")
         st.markdown(f"**Q:** {qa[1]}")
+        st.markdown(f"**A:** {qa[2]}")
+        st.caption(f"model: {qa[3]}")
         st.markdown(f"**A:** {qa[2]}")
         st.caption(f"model: {qa[3]}")
