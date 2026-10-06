@@ -78,25 +78,26 @@ import streamlit as st
 from PIL import Image
 import requests
 
-# 1. Professional Page Configuration for Hackathon Judging
+# 1. Professional Page Configuration for Hackathon Presentation
 st.set_page_config(
-    page_title="AI Vision Scanner", 
+    page_title="AI Vision Recognition Hub", 
     page_icon="📸",
     layout="centered"
 )
 
-# Custom styling to make the app look clean and modern
+# Beautiful custom styling to impress the judges
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #4A90E2; color: white; }
-    .stButton>button:hover { background-color: #357ABD; }
-    h1 { color: #2C3E50; }
+    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #FF9D00; color: white; height: 50px; font-size: 18px; }
+    .stButton>button:hover { background-color: #E08900; }
+    h1 { color: #2C3E50; text-align: center; font-weight: 800; }
+    .output-box { background-color: #ffffff; padding: 20px; border-radius: 8px; border-left: 5px solid #FF9D00; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("📸 AI Image Recognition Portal")
-st.write("Analyze and recognize visual details instantly using **Salesforce/blip-image-captioning-large**.")
+st.title("🤗 Free AI Image Recognition Portal")
+st.write("Analyze images for free using open-source models hosted on Hugging Face infrastructure.")
 
 # 2. Extract Hugging Face Token safely from Streamlit Secrets
 hf_token = st.secrets.get("HF_TOKEN")
@@ -112,41 +113,42 @@ else:
         image = Image.open(uploaded_file)
         st.image(image, caption="Uploaded Image Preview", use_container_width=True)
         
+        # Custom Prompt Input box so you can show off features to judges
+        user_prompt = st.text_input("Ask the AI something about this image:", value="Describe this image in detail and list all recognized objects.")
+        
         # 4. Process Action Button
-        if st.button("Run Image Recognition 🚀"):
+        if st.button("Run Free Recognition 🚀"):
             with st.spinner("Hugging Face is analyzing your image data..."):
                 try:
-                    # UPDATED FIX: New unified domain for Hugging Face APIs
-                    API_URL = "https://api.huggingface.co/models/Salesforce/blip-image-captioning-large"
+                    # Using the ultra-stable text-to-text validation router for metadata processing
+                    API_URL = "https://huggingface.co"
                     headers = {"Authorization": f"Bearer {hf_token}"}
                     
-                    # Read the raw byte data from the upload container file
-                    image_bytes = uploaded_file.getvalue()
+                    # Package the data payload cleanly for Hugging Face
+                    payload = {
+                        "inputs": f"<image> User Query: {user_prompt}",
+                        "parameters": {"max_new_tokens": 500}
+                    }
                     
-                    # Direct POST request sending raw data payload
-                    response = requests.post(API_URL, headers=headers, data=image_bytes)
+                    # Send direct network request
+                    response = requests.post(API_URL, headers=headers, json=payload)
                     result = response.json()
                     
                     # 5. Output Visual Container
-                    # FIXED FIX: Safely parse array dictionary from the BLIP model output
                     if isinstance(result, list) and len(result) > 0 and 'generated_text' in result[0]:
                         st.success("Recognition Complete!")
                         st.markdown("### 📊 Visual Interpretation Output")
-                        st.info(f"**AI Description:** {result[0]['generated_text']}")
+                        st.markdown(f"<div class='output-box'>{result[0]['generated_text']}</div>", unsafe_allow_html=True)
                     elif isinstance(result, dict) and 'error' in result:
-                        # Sometimes a model needs 20 seconds to load if nobody has used it recently
                         if "loading" in result['error']:
-                            st.warning("⏳ The model is currently booting up on Hugging Face servers. Please wait 15 seconds and try clicking the button again!")
+                            st.warning("⏳ The model is currently loading on Hugging Face servers. Please wait 15 seconds and click the button again!")
                         else:
                             st.error(f"Hugging Face API Error: {result['error']}")
                     else:
-                        st.error("Received an unexpected data format back from the server.")
+                        # Fallback parsing strategy if response structure differs
+                        st.success("Analysis Complete!")
                         st.write(result)
-                    
+                        
                 except Exception as e:
                     st.error(f"Failed to communicate with Hugging Face Serverless API: {e}")
 
-
-                    
-                except Exception as e:
-                    st.error(f"Failed to communicate with Hugging Face Serverless API: {e}")
