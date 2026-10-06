@@ -100,9 +100,24 @@ st.markdown("<p class='subtitle'>Free, open-source image intelligence: captionin
             unsafe_allow_html=True)
 
 # ---------- Lazy-loaded models (each loads only when first used, then stays cached) ----------
+
+
 @st.cache_resource(show_spinner=False)
 def get_captioner():
-    return pipeline("image-to-text", model="Salesforce/blip-image-captioning-base")
+    from transformers import BlipProcessor, BlipForConditionalGeneration
+    name = "Salesforce/blip-image-captioning-base"
+    processor = BlipProcessor.from_pretrained(name)
+    model = BlipForConditionalGeneration.from_pretrained(name)
+    model.eval()
+    return processor, model
+
+def generate_caption(img):
+    import torch
+    processor, model = get_captioner()
+    inputs = processor(images=img, return_tensors="pt")
+    with torch.no_grad():
+        out = model.generate(**inputs, max_new_tokens=40)
+    return processor.decode(out[0], skip_special_tokens=True)
 
 @st.cache_resource(show_spinner=False)
 def get_detector():
@@ -199,7 +214,7 @@ if uploaded:
             if do_caption:
                 with st.spinner("Describing the scene..."):
                     t = time.time()
-                    R["caption"] = get_captioner()(image, max_new_tokens=40)[0]["generated_text"]
+                    R["caption"] = generate_caption(image)
                     R["timings_sec"]["caption"] = round(time.time() - t, 2)
 
             if do_classify:
