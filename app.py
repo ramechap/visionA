@@ -76,7 +76,7 @@
 
 import streamlit as st
 from PIL import Image
-from huggingface_hub import InferenceClient
+import requests
 
 # 1. Professional Page Configuration for Hackathon Judging
 st.set_page_config(
@@ -96,7 +96,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("📸 AI Image Recognition Portal")
-st.write("Analyze and recognize visual details instantly using **Salesforce/blip-image-captioning-large** on the free Hugging Face tier.")
+st.write("Analyze and recognize visual details instantly using **Salesforce/blip-image-captioning-large**.")
 
 # 2. Extract Hugging Face Token safely from Streamlit Secrets
 hf_token = st.secrets.get("HF_TOKEN")
@@ -104,12 +104,6 @@ hf_token = st.secrets.get("HF_TOKEN")
 if not hf_token:
     st.warning("⚠️ Configuration Error: Please add your HF_TOKEN inside your Streamlit Cloud Advanced Settings.")
 else:
-    # Connect directly to Hugging Face Serverless API
-    client = InferenceClient(
-        model="Salesforce/blip-image-captioning-large", 
-        token=hf_token
-    )
-
     # 3. User Upload Area
     uploaded_file = st.file_uploader("Drop or upload an image file (JPG, PNG, JPEG)", type=["jpg", "jpeg", "png"])
 
@@ -122,13 +116,35 @@ else:
         if st.button("Run Image Recognition 🚀"):
             with st.spinner("Hugging Face is analyzing your image data..."):
                 try:
-                    # Pass the raw image bytes right to the cloud serverless endpoint
-                    response = client.image_to_text(uploaded_file.getvalue())
+                    # Using the standard direct API router address
+                    API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large"
+                    headers = {"Authorization": f"Bearer {hf_token}"}
+                    
+                    # Read the raw byte data from the upload container file
+                    image_bytes = uploaded_file.getvalue()
+                    
+                    # Direct POST request sending raw data payload
+                    response = requests.post(API_URL, headers=headers, data=image_bytes)
+                    result = response.json()
                     
                     # 5. Output Visual Container
-                    st.success("Recognition Complete!")
-                    st.markdown("### 📊 Visual Interpretation Output")
-                    st.info(f"**AI Description:** {response}")
+                    if isinstance(result, list) and len(result) > 0 and 'generated_text' in result[0]:
+                        st.success("Recognition Complete!")
+                        st.markdown("### 📊 Visual Interpretation Output")
+                        st.info(f"**AI Description:** {result[0]['generated_text']}")
+                    elif isinstance(result, dict) and 'error' in result:
+                        # Sometimes a model needs 20 seconds to load if nobody has used it recently
+                        if "loading" in result['error']:
+                            st.warning("⏳ The model is currently booting up on Hugging Face servers. Please wait 15 seconds and try clicking the button again!")
+                        else:
+                            st.error(f"Hugging Face API Error: {result['error']}")
+                    else:
+                        st.error("Received an unexpected data format back from the server.")
+                        st.write(result)
+                    
+                except Exception as e:
+                    st.error(f"Failed to communicate with Hugging Face Serverless API: {e}")
+
                     
                 except Exception as e:
                     st.error(f"Failed to communicate with Hugging Face Serverless API: {e}")
