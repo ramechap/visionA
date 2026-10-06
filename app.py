@@ -816,9 +816,17 @@ def call_gemini(contents, as_json=False):
 # JSON PARSER
 # ============================================================
 
+# ============================================================
+# JSON PARSER
+# ============================================================
+
 def parse_json(text):
     """
-    Clean markdown code fences and parse JSON.
+    Clean markdown code fences and parse Gemini JSON.
+
+    Gemini is expected to return a JSON object.
+    If it returns a one-item list containing an object,
+    unwrap that list automatically.
     """
 
     text = text.strip()
@@ -837,7 +845,35 @@ def parse_json(text):
         text,
     )
 
-    return json.loads(text)
+    data = json.loads(text)
+
+    # Gemini sometimes returns:
+    # [
+    #   {...}
+    # ]
+    #
+    # Unwrap a single-item list.
+    if isinstance(data, list):
+
+        if len(data) == 1 and isinstance(data[0], dict):
+            data = data[0]
+
+        else:
+            raise ValueError(
+                "Gemini returned a JSON list instead of "
+                "the expected analysis object."
+            )
+
+    # Final safety check
+    if not isinstance(data, dict):
+
+        raise ValueError(
+            "Gemini returned JSON, but the root value "
+            "was not an object."
+        )
+
+    return data
+
 
 
 # ============================================================
