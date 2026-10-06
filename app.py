@@ -34,7 +34,9 @@ else:
         buffered = BytesIO()
         image.save(buffered, format="JPEG")
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        
 
+        # 4. Create the "Process" button
         # 4. Create the "Process" button
         if st.button("Analyze Image 🚀"):
             with st.spinner("The AI is analyzing your image in the cloud..."):
@@ -53,10 +55,23 @@ else:
                         ]
                     )
                     
-                    # Show results on the web screen!
-                    st.success("Analysis Complete!")
-                    st.markdown("### 📊 AI Recognition Results")
-                    st.write(response.choices.message.content)
+                    # --- SAFE CHECKING ---
+                    # If it returns a string error or a dictionary instead of an object
+                    if isinstance(response, str):
+                        st.error("⚠️ OpenRouter returned an error string instead of data:")
+                        st.code(response)
+                    elif hasattr(response, 'choices') and response.choices:
+                        # Show results on the web screen if successful
+                        st.success("Analysis Complete!")
+                        st.markdown("### 📊 AI Recognition Results")
+                        st.write(response.choices[0].message.content)
+                    elif isinstance(response, dict) and 'choices' in response:
+                        st.success("Analysis Complete!")
+                        st.markdown("### 📊 AI Recognition Results")
+                        st.write(response['choices'][0]['message']['content'])
+                    else:
+                        st.error("Unexpected response layout received:")
+                        st.write(response)
                     
                 except Exception as e:
                     st.error(f"Something went wrong: {e}")
