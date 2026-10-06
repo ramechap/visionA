@@ -116,8 +116,8 @@ else:
         if st.button("Run Image Recognition 🚀"):
             with st.spinner("Hugging Face is analyzing your image data..."):
                 try:
-                    # Using the standard direct API router address
-                    API_URL = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large"
+                    # UPDATED FIX: New unified domain for Hugging Face APIs
+                    API_URL = "https://api.huggingface.co/models/Salesforce/blip-image-captioning-large"
                     headers = {"Authorization": f"Bearer {hf_token}"}
                     
                     # Read the raw byte data from the upload container file
@@ -128,6 +128,7 @@ else:
                     result = response.json()
                     
                     # 5. Output Visual Container
+                    # FIXED FIX: Safely parse array dictionary from the BLIP model output
                     if isinstance(result, list) and len(result) > 0 and 'generated_text' in result[0]:
                         st.success("Recognition Complete!")
                         st.markdown("### 📊 Visual Interpretation Output")
@@ -144,6 +145,7 @@ else:
                     
                 except Exception as e:
                     st.error(f"Failed to communicate with Hugging Face Serverless API: {e}")
+
 
                     
                 except Exception as e:
