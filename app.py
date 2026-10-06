@@ -111,7 +111,7 @@ else:
         base_url="https://router.huggingface.co/v1",
         api_key=hf_token
     )
-
+        
     # 3. Simple Image File Uploader Component
     uploaded_file = st.file_uploader("Drop or upload an image file (JPG, PNG, JPEG)", type=["jpg", "jpeg", "png"])
 
@@ -131,7 +131,7 @@ else:
                     
                     # Connect to a flagship vision model hosted on Hugging Face's ecosystem
                     response = client.chat.completions.create(
-                        model="meta-llama/Llama-3.2-11b-Vision-Instruct", 
+                        model="Qwen/Qwen2.5-VL-7B-Instruct",
                         messages=[
                             {
                                 "role": "user",
