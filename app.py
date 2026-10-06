@@ -131,7 +131,7 @@ else:
                     
                     # Connect to a flagship vision model hosted on Hugging Face's ecosystem
                     response = client.chat.completions.create(
-                        model="Qwen/Qwen2.5-VL-7B-Instruct",
+                        model="meta-llama/Llama-3.2-11B-Vision-Instruct:novita",
                         messages=[
                             {
                                 "role": "user",
