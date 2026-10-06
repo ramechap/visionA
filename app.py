@@ -41,9 +41,13 @@ else:
         if st.button("Analyze Image 🚀"):
             with st.spinner("The AI is analyzing your image in the cloud..."):
                 try:
-                    # Send the image data to DeepSeek
+                    # Explicitly formatting OpenRouter requirements
                     response = client.chat.completions.create(
                         model="deepseek/deepseek-v4.1-flash", 
+                        extra_headers={
+                            "HTTP-Referer": "https://streamlit.app", # Required by OpenRouter
+                            "X-Title": "Hackathon App Prototype",     # Required by OpenRouter
+                        },
                         messages=[
                             {
                                 "role": "user",
@@ -55,23 +59,16 @@ else:
                         ]
                     )
                     
-                    # --- SAFE CHECKING ---
-                    # If it returns a string error or a dictionary instead of an object
+                    # --- SAFE CHECKING FOR STRUCT TYPE ---
                     if isinstance(response, str):
-                        st.error("⚠️ OpenRouter returned an error string instead of data:")
-                        st.code(response)
+                        st.error("⚠️ The server sent an invalid text response. Check if your API key or model string has a typo.")
+                        st.code(response[:500]) # Prints snippet to prevent page clutter
                     elif hasattr(response, 'choices') and response.choices:
-                        # Show results on the web screen if successful
                         st.success("Analysis Complete!")
                         st.markdown("### 📊 AI Recognition Results")
                         st.write(response.choices[0].message.content)
-                    elif isinstance(response, dict) and 'choices' in response:
-                        st.success("Analysis Complete!")
-                        st.markdown("### 📊 AI Recognition Results")
-                        st.write(response['choices'][0]['message']['content'])
                     else:
-                        st.error("Unexpected response layout received:")
-                        st.write(response)
-                    
+                        st.error("Received unexpected format from API. Please try again.")
+                        
                 except Exception as e:
-                    st.error(f"Something went wrong: {e}")
+                    st.error(f"Something went wrong during the cloud call: {e}")
