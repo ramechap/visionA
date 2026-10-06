@@ -381,7 +381,7 @@ def discover_models(key):
             actions = getattr(m, "supported_actions", None) or []
             name = m.name.replace("models/", "")
             if (
-                "generateContent" in actions
+                (not actions or "generateContent" in actions)
                 and name.startswith("gemini")
                 and "flash" in name
                 and not any(x in name for x in ("image", "tts", "live", "audio", "embedding"))
@@ -533,6 +533,7 @@ if uploaded:
                 st.error("The model returned malformed JSON. Please click Run again.")
             except Exception as e:
                 st.error(f"Analysis failed: {e}")
+                st.caption("Models tried: " + ", ".join(model_candidates()))
                 st.info("Check that your API key is valid, that you haven't hit the free-tier rate limit "
                         "(wait a minute and retry), or try a different model name in the sidebar.")
 
