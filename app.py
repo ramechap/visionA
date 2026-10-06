@@ -82,12 +82,12 @@ from io import BytesIO
 
 # 1. Professional Page Configuration for Hackathon Submission
 st.set_page_config(
-    page_title="AI Vision Recognition Scanner", 
+    page_title="AI Vision Scanner Portal", 
     page_icon="📸",
     layout="centered"
 )
 
-# Clean, professional CSS branding for your judging panel
+# Clean, professional UI CSS styling for your hackathon judges
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
@@ -98,7 +98,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("📸 Open-Source Image Recognition Portal")
-st.write("Analyze visual data seamlessly via Hugging Face's official unified router.")
+st.write("Analyze visual data seamlessly via Hugging Face's official model router.")
 
 # 2. Extract Hugging Face Token safely from Streamlit Cloud Secrets
 hf_token = st.secrets.get("HF_TOKEN")
@@ -106,12 +106,12 @@ hf_token = st.secrets.get("HF_TOKEN")
 if not hf_token:
     st.warning("⚠️ Configuration Error: Please ensure your hf_... access token is saved under HF_TOKEN inside Streamlit Cloud Settings.")
 else:
-    # Initialize connection using the new official Hugging Face OpenAI-compatible gateway
+    # Initialize connection using the official OpenAI-compatible Hugging Face gateway
     client = OpenAI(
         base_url="https://router.huggingface.co/v1",
         api_key=hf_token
     )
-        
+
     # 3. Simple Image File Uploader Component
     uploaded_file = st.file_uploader("Drop or upload an image file (JPG, PNG, JPEG)", type=["jpg", "jpeg", "png"])
 
@@ -129,9 +129,9 @@ else:
                     image.save(buffered, format="JPEG")
                     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
                     
-                    # Connect to a flagship vision model hosted on Hugging Face's ecosystem
+                    # Connect to the verified free tier vision model hosted natively on Hugging Face
                     response = client.chat.completions.create(
-                        model="meta-llama/Llama-3.2-11B-Vision-Instruct:novita",
+                        model="Qwen/Qwen2.5-VL-3B-Instruct", 
                         messages=[
                             {
                                 "role": "user",
@@ -147,8 +147,9 @@ else:
                     # 5. Output Visual Container Presentation
                     st.success("Recognition Complete!")
                     st.markdown("### 📊 Visual Interpretation Output")
-                    st.write(response.choices[0].message.content)
+                    st.write(response.choices.message.content)
                     
                 except Exception as e:
                     st.error(f"Failed to communicate with Hugging Face Router API: {e}")
+
 
